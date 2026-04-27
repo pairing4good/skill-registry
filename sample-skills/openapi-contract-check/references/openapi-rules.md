@@ -84,6 +84,18 @@ Use this catalog when performing an OpenAPI contract check. Work through each ca
 **Violation:** `GET /users/{id}` with no `parameters` block  
 **Fix:** Add `parameters:\n  - name: id\n    in: path\n    required: true\n    schema:\n      type: string`
 
+### RULE-PATH-008
+**Severity:** INFO | **Versions:** ALL  
+**Check:** Operations marked `deprecated: true` include a `description` explaining the replacement or timeline (e.g., "Deprecated. Use `GET /v2/users` instead. Will be removed 2025-01-01.").  
+**Violation:** `deprecated: true` with no context in `description`  
+**Fix:** Add a description on the operation: `description: "Deprecated. Use GET /v2/users instead. Will be removed 2025-01-01."`
+
+### RULE-PATH-009
+**Severity:** INFO | **Versions:** ALL  
+**Check:** Path segments use plural nouns for collection resources and contain no verbs (REST convention).  
+**Violation:** `/getUser`, `/user/{id}`, `/user/create`  
+**Fix:** `/users`, `/users/{id}`, `POST /users`
+
 ---
 
 ## Category 3: Parameters
@@ -198,6 +210,12 @@ Use this catalog when performing an OpenAPI contract check. Work through each ca
 **Violation:** Schema defined but no `example` anywhere in the response  
 **Fix:** Add `example:` inline or in the schema component
 
+### RULE-RESP-009
+**Severity:** WARNING | **Versions:** ALL  
+**Check:** `GET` operations that return an array (or a wrapper object containing an array) document pagination — either via `limit`/`offset` query parameters, a cursor parameter, or a `Link` header. An unbounded list endpoint is a latency and memory risk for callers.  
+**Violation:** `GET /orders` returning `schema: type: array` with no pagination parameters documented  
+**Fix:** Add `limit` and `offset` (or `cursor`) query parameters, document their defaults and maximums, and describe the total-count or next-page mechanism in the response schema
+
 ---
 
 ## Category 6: Schema Quality
@@ -221,10 +239,12 @@ Use this catalog when performing an OpenAPI contract check. Work through each ca
 **Fix:** Define properties or add `additionalProperties: true` with a comment explaining the dynamic shape
 
 ### RULE-SCHEMA-004
-**Severity:** ERROR | **Versions:** 3.0.x only  
-**Check:** `nullable: true` is used instead of `type: [string, null]` (the `null` type is only valid in OAS 3.1).  
-**Violation:** `type: [string, null]` in a 3.0.x spec  
-**Fix:** `type: string\nnullable: true`
+**Severity:** ERROR | **Versions:** ALL  
+**Check:** Nullable fields use the syntax appropriate for the spec version. In OAS 3.0.x: use `nullable: true` (the `null` type keyword is not valid). In OAS 3.1.x: use `type: [string, null]` or a `oneOf` with `type: null` (`nullable` was removed). In OAS 2.x: use `x-nullable: true`.  
+**Violation (3.0.x):** `type: [string, null]` — `null` is not a valid type in 3.0.x  
+**Fix (3.0.x):** `type: string\nnullable: true`  
+**Violation (3.1.x):** `nullable: true` — the keyword was removed in 3.1  
+**Fix (3.1.x):** `type: [string, null]`
 
 ### RULE-SCHEMA-005
 **Severity:** WARNING | **Versions:** ALL  

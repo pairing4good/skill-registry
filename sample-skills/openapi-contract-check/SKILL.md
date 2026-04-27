@@ -17,15 +17,13 @@ Identify what you're checking:
 - A URL to fetch
 - Content pasted inline
 
+If the file can't be read or the content doesn't parse as valid YAML/JSON, say so immediately and stop — don't attempt to apply rules against malformed input. If the spec is missing the top-level `openapi` or `swagger` field, flag that as an ERROR before running any other rules.
+
 Confirm the OpenAPI version (look for `openapi: 3.x.x` or `swagger: "2.0"`) — some rules apply only to specific versions.
 
 ## Step 2: Determine scope
 
-Ask (or infer from context):
-- **Full audit** — run all rule categories
-- **Targeted check** — user mentions a specific concern (e.g., "check my security definitions", "are my error responses complete")
-
-Default to a full audit unless the user indicates otherwise.
+Default to a full audit. Run all rule categories unless the user's message makes a specific concern clear (e.g., "check my security definitions", "are my error responses complete") — in that case, focus on the relevant categories but mention which ones you're skipping.
 
 ## Step 3: Run the rule catalog
 
@@ -88,8 +86,9 @@ If the spec is clean, say so clearly: "No issues found across N rules checked."
 
 ## After the report
 
-Offer to:
+If there are any ERRORs, proactively offer to fix them: "I can apply all N error-level fixes now — want me to?" Don't wait to be asked.
+
+Then offer:
 - Explain any finding in more detail
-- Apply all ERROR-level fixes
-- Generate a corrected version of a specific section
+- Apply WARNING-level fixes
 - Check a revised spec after the user makes changes
