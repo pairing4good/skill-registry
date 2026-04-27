@@ -121,30 +121,19 @@ Artifactory is now ready. Move on to Part 2.
 
 ## Part 2: Build the MCP Server with `mcp-builder`
 
-### 1. Open an empty project directory
-
-Create a fresh directory for the MCP server — it should not be inside this repository:
-
-```bash
-mkdir ~/skill-registry-mcp && cd ~/skill-registry-mcp
-```
-
-Open it in your editor and start Claude Code there.
-
-### 2. Make sure the `mcp-builder` skill is available
+### 1. Make sure the `mcp-builder` skill is available
 
 Confirm the skill is installed in Claude Code. If not, install it from https://github.com/anthropics/skills before continuing.
 
-### 3. Paste the build prompt into Claude Code
+### 2. Build the MCP Server
 
-Open [`skill-registry-mcp-prompt.md`](skill-registry-mcp-prompt.md) in this repository and copy the entire prompt block (everything after the `---` divider). Paste it into Claude Code in your new project directory.
+Invoke the `mcp-builder` skill with the spec file:
 
-Claude Code will:
-1. Read `mcp-builder`'s SKILL.md to understand the required structure
-2. Propose an implementation plan (language, project layout, dependencies)
-3. Wait for your confirmation before generating code
+```
+/mcp-builder @skill-registry-mcp-prompt.md
+```
 
-Review the plan and confirm. Claude Code will then produce the full MCP server — source code, tests, `.env.example`, README, and MCP client config snippets.
+The skill will read the spec and guide you through scaffolding, implementing, and packaging the MCP server.
 
 ### What gets built
 

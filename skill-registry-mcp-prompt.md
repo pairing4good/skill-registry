@@ -1,9 +1,5 @@
 # Claude Code Input: Build the `skill-registry` MCP Server
 
-Claude Code should have access to the `mcp-builder` skill (from https://github.com/anthropics/skills) before running this prompt.
-
----
-
 ## Prompt for Claude Code
 
 I want you to use the `mcp-builder` skill to create an MCP server called `skill-registry`. Read `mcp-builder`'s SKILL.md first and follow its guidance for structure, testing, and packaging. Then build the server according to the specification below.
