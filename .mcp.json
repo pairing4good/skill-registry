@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "skill-registry": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["skill-registry-mcp-server/dist/index.js"],
+      "env": {
+        "SKILL_REGISTRY_BACKEND": "artifactory",
+        "ARTIFACTORY_PLATFORM_URL": "${ARTIFACTORY_PLATFORM_URL}",
+        "ARTIFACTORY_REPOSITORY": "${ARTIFACTORY_REPOSITORY:-skills-registry-local}",
+        "ARTIFACTORY_AUTH_METHOD": "${ARTIFACTORY_AUTH_METHOD:-bearer}",
+        "ARTIFACTORY_ACCESS_TOKEN": "${ARTIFACTORY_ACCESS_TOKEN}"
+      }
+    }
+  }
+}
