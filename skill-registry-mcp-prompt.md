@@ -59,14 +59,47 @@ https://<JFROG_PLATFORM_URL>/artifactory/api/skills/<REPOSITORY_NAME>
 |---|---|---|
 | `search_skills` | `/api/v1/search?q=<query>&limit=<n>&offset=0` | GET |
 | `get_skill_manifest` | `/api/v1/skills/{slug}/file?version=<version>&path=SKILL.md` | GET |
-| `get_skill_manifest` (metadata) | `/api/v1/skills/{slug}/versions/{version}` | GET |
 | `install_skill` | `/api/v1/download?slug=<slug>&version=<version>` | GET (returns zip) |
 
-**Version resolution for "latest":** call `/api/v1/skills/{slug}` and read `latestVersion`, then use that.
+> **Important:** The endpoints `/api/v1/skills/{slug}` and `/api/v1/skills/{slug}/versions/{version}` are **not available** in JFrog's current Skills API — they return HTTP 404. Do not call them. All required metadata is returned directly from the search endpoint or the SKILL.md file.
 
-**Install behavior:** the download endpoint returns a zip. Unzip into `destination_path`, preserving directory structure. Verify the SHA-256 of the downloaded zip matches the `fingerprint` returned by `/api/v1/skills/{slug}/versions/{version}` before unzipping. Refuse to install if the fingerprint doesn't match and return a clear error.
+**Version resolution for "latest":** The search endpoint returns the current published version for each skill. For resolving "latest" in `get_skill_manifest` and `install_skill`, execute a single search call for the specific slug (`q=<slug>&limit=1`) and use the `version` field from the matching result.
 
-**Search response mapping:** Artifactory returns `{results: [{slug, version, displayName, summary, match}], total, limit, offset}`. Map to the MCP `search_skills` return shape. If `tags` or `updated_at` are not in the search response, fetch them via `/api/v1/skills/{slug}` for the top results, but cap this enrichment at the top 10 to avoid latency blowup.
+**Install behavior:** the download endpoint returns a zip. Unzip into `destination_path`, preserving directory structure. Fingerprint verification via a separate versions endpoint is **not available**; skip fingerprint validation against a remote source.
+
+**Search response mapping:** The Artifactory Skills API returns the following shape — use these **exact field names**:
+
+```json
+{
+  "results": [
+    {
+      "name": "my-skill-slug",
+      "version": "1.0.0",
+      "description": "One-line description of the skill.",
+      "author": "skill-registry-sample",
+      "downloadUrl": "api/v1/download?slug=my-skill-slug&version=1.0.0",
+      "tags": ["tag-a", "tag-b"],
+      "match": 0.95
+    }
+  ],
+  "total": 1,
+  "offset": 0,
+  "limit": 20
+}
+```
+
+Map to the MCP `search_skills` return shape as follows:
+
+| MCP field | Artifactory field | Notes |
+|---|---|---|
+| `slug` | `name` | Direct mapping |
+| `display_name` | derived from `name` | Convert kebab-case to Title Case (e.g. `my-skill-slug` → `My Skill Slug`) |
+| `summary` | `description` | Direct mapping |
+| `latest_version` | `version` | Direct mapping |
+| `tags` | `tags` | Already present in the search response — no enrichment call needed |
+| `updated_at` | *(not available)* | Return empty string `""` |
+
+**Do not** make a secondary enrichment request to `/api/v1/skills/{slug}` to fetch tags — tags are already present in the search response and that endpoint returns 404.
 
 **Error handling:** translate HTTP 401/403 → "authentication failed" (no credential details), 404 → "skill not found", 5xx → "registry unavailable, retry later". Other errors → generic message with HTTP status code.
 
