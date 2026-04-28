@@ -126,6 +126,7 @@ export class ArtifactoryBackend implements RegistryBackend {
         const response = await this.client.get<ArrayBuffer>(path, {
           params,
           responseType: 'arraybuffer',
+          headers: { Accept: 'application/zip, application/octet-stream, */*' },
         });
         return Buffer.from(response.data);
       } catch (err) {

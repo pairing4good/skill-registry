@@ -71,7 +71,7 @@ https://<JFROG_PLATFORM_URL>/artifactory/api/skills/<REPOSITORY_NAME>
 
 **Fingerprint:** There is no endpoint to fetch a remote fingerprint for verification. Do not attempt fingerprint validation. Return an empty string `""` for the `fingerprint` field in both `get_skill_manifest` and `install_skill` responses.
 
-**Install behavior:** The download endpoint returns a zip. Unzip into `destination_path`, preserving directory structure. No fingerprint verification is required or possible.
+**Install behavior:** The download endpoint returns a zip. When calling it, set the `Accept` header to `application/zip, application/octet-stream, */*` — **not** `application/json`. Sending `application/json` causes the server to return HTTP 406. If your HTTP client sets a default `Accept: application/json` header (e.g. axios), you must override it explicitly for this request. Unzip the response into `destination_path`, preserving directory structure. No fingerprint verification is required or possible.
 
 **Search response — use these exact field names from the Artifactory API:**
 
