@@ -27,8 +27,36 @@ interface ArtifactorySearchResponse {
   offset: number;
 }
 
+interface ArtifactoryStorageChild {
+  uri: string;
+  folder: boolean;
+}
+
+interface ArtifactoryStorageListing {
+  children?: ArtifactoryStorageChild[];
+}
+
+interface ArtifactoryFileListEntry {
+  uri: string;
+  size: number;
+}
+
+interface ArtifactoryFileList {
+  files: ArtifactoryFileListEntry[];
+}
+
 
 const MAX_RETRY_ATTEMPTS = 3;
+
+function compareSemver(a: string, b: string): number {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
 
 function translateHttpError(error: AxiosError, slug?: string): RegistryError {
   const status = error.response?.status;
@@ -79,6 +107,8 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
 
 export class ArtifactoryBackend implements RegistryBackend {
   private readonly client: AxiosInstance;
+  private readonly nativeClient: AxiosInstance;
+  private readonly repository: string;
   private readonly rateLimiter: RateLimiter;
 
   constructor(config: ArtifactoryConfig, rateLimitRpm: number) {
@@ -93,6 +123,8 @@ export class ArtifactoryBackend implements RegistryBackend {
             ).toString('base64')}`,
           };
 
+    const agentOptions = new https.Agent({ rejectUnauthorized: config.verifyTls });
+
     this.client = axios.create({
       baseURL,
       timeout: config.timeoutSeconds * 1_000,
@@ -100,9 +132,17 @@ export class ArtifactoryBackend implements RegistryBackend {
         ...authHeaders,
         Accept: 'application/json',
       },
-      httpsAgent: new https.Agent({ rejectUnauthorized: config.verifyTls }),
+      httpsAgent: agentOptions,
     });
 
+    this.nativeClient = axios.create({
+      baseURL: `${config.platformUrl}/artifactory`,
+      timeout: config.timeoutSeconds * 1_000,
+      headers: authHeaders,
+      httpsAgent: agentOptions,
+    });
+
+    this.repository = config.repository;
     this.rateLimiter = new RateLimiter(rateLimitRpm);
   }
 
@@ -155,12 +195,25 @@ export class ArtifactoryBackend implements RegistryBackend {
 
   private async resolveVersion(slug: string, version: string): Promise<string> {
     if (version !== 'latest') return version;
-    const data = await this.get<ArtifactorySearchResponse>('/api/v1/search', { q: slug, limit: 1, offset: 0 });
-    const match = data.results?.find((r) => r.name === slug);
-    if (!match) {
-      throw new RegistryError(`Not found: skill "${slug}" does not exist in the registry.`, 'NOT_FOUND');
-    }
-    return match.version;
+    await this.rateLimiter.acquire();
+    return withRetry(async () => {
+      try {
+        const response = await this.nativeClient.get<ArtifactoryStorageListing>(
+          `/api/storage/${this.repository}/${slug}`,
+        );
+        const folders = (response.data.children ?? [])
+          .filter((c) => c.folder)
+          .map((c) => c.uri.replace(/^\//, ''))
+          .filter((v) => /^\d+\.\d+\.\d+/.test(v));
+        if (folders.length === 0) {
+          throw new RegistryError(`Not found: skill "${slug}" does not exist in the registry.`, 'NOT_FOUND');
+        }
+        return folders.sort(compareSemver).at(-1)!;
+      } catch (err) {
+        if (err instanceof AxiosError) throw translateHttpError(err, slug);
+        throw err;
+      }
+    });
   }
 
   async searchSkills(query: string, limit: number): Promise<SkillSummary[]> {
@@ -201,21 +254,53 @@ export class ArtifactoryBackend implements RegistryBackend {
   ): Promise<InstallResult> {
     const version = await this.resolveVersion(slug, requestedVersion);
 
-    const zipBuffer = await this.getBuffer('/api/v1/download', { slug, version });
+    // List all files in the skill version directory recursively.
+    await this.rateLimiter.acquire();
+    const fileList = await withRetry(async () => {
+      try {
+        const response = await this.nativeClient.get<ArtifactoryFileList>(
+          `/api/storage/${this.repository}/${slug}/${version}`,
+          { params: { list: '', deep: 1, listFolders: 0 } },
+        );
+        return response.data;
+      } catch (err) {
+        if (err instanceof AxiosError) throw translateHttpError(err, slug);
+        throw err;
+      }
+    });
+
+    if (!fileList.files?.length) {
+      throw new RegistryError(`Not found: skill "${slug}@${version}" has no files.`, 'NOT_FOUND');
+    }
+
+    // Download each file and assemble into a zip.
+    const zip = new AdmZip();
+    for (const file of fileList.files) {
+      const relPath = file.uri.replace(/^\//, '');
+      await this.rateLimiter.acquire();
+      const fileBuffer = await withRetry(async () => {
+        try {
+          const response = await this.nativeClient.get<ArrayBuffer>(
+            `/${this.repository}/${slug}/${version}/${relPath}`,
+            { responseType: 'arraybuffer' },
+          );
+          return Buffer.from(response.data);
+        } catch (err) {
+          if (err instanceof AxiosError) throw translateHttpError(err, slug);
+          throw err;
+        }
+      });
+      zip.addFile(relPath, fileBuffer);
+    }
 
     await mkdir(destinationPath, { recursive: true });
-
-    const zip = new AdmZip(zipBuffer);
-    const entries = zip.getEntries();
     zip.extractAllTo(destinationPath, true);
-
-    const filesWritten = entries.filter((e) => !e.isDirectory).length;
 
     return {
       slug,
       version,
       installed_path: destinationPath,
-      files_written: filesWritten,
+      files_written: fileList.files.length,
       fingerprint: '',
     };
   }

@@ -53,25 +53,43 @@ https://<JFROG_PLATFORM_URL>/artifactory/api/skills/<REPOSITORY_NAME>
 
 **Authentication:** Bearer token via `Authorization: Bearer <ACCESS_TOKEN>` header, OR HTTP Basic with username + identity token. Support both; prefer Bearer.
 
+**Two HTTP clients required.** The backend needs two axios (or equivalent) client instances:
+
+1. **Skills API client** — base URL: `${PLATFORM_URL}/artifactory/api/skills/${REPOSITORY}` — used only for search and fetching SKILL.md.
+2. **Native Artifactory client** — base URL: `${PLATFORM_URL}/artifactory` — used for version resolution and file downloads (see below). Both clients share the same auth headers and TLS settings.
+
 **Endpoints to use:**
 
-| Operation | Artifactory Endpoint | Method |
-|---|---|---|
-| Search skills | `/api/v1/search?q=<query>&limit=<n>&offset=0` | GET |
-| Fetch SKILL.md | `/api/v1/skills/{slug}/file?version=<version>&path=SKILL.md` | GET |
-| Download zip | `/api/v1/download?slug=<slug>&version=<version>` | GET (returns zip) |
+| Operation | Client | Endpoint | Method |
+|---|---|---|---|
+| Search skills | Skills API | `/api/v1/search?q=<query>&limit=<n>&offset=0` | GET |
+| Fetch SKILL.md | Skills API | `/api/v1/skills/{slug}/file?version=<version>&path=SKILL.md` | GET |
+| Resolve latest version | Native | `/api/storage/{repo}/{slug}` | GET |
+| List files in version | Native | `/api/storage/{repo}/{slug}/{version}?list&deep=1&listFolders=0` | GET |
+| Download individual file | Native | `/{repo}/{slug}/{version}/{relPath}` | GET |
 
-> **Critical:** The following endpoints are **not implemented** in JFrog's current Skills API and return HTTP 404. **Do not call them:**
-> - `/api/v1/skills/{slug}` — does not exist
-> - `/api/v1/skills/{slug}/versions/{version}` — does not exist
->
-> Everything you need is available from the search endpoint and the SKILL.md file endpoint.
+> **Critical:** The following endpoints are **not implemented** or require special permissions. **Do not call them:**
+> - `/api/v1/skills/{slug}` — does not exist (404)
+> - `/api/v1/skills/{slug}/versions/{version}` — does not exist (404)
+> - `/api/v1/download?slug=<slug>&version=<version>` — does not exist (404); skills are stored as individual files, not pre-built zips
+> - `/api/archive/download/{repo}/{slug}/{version}?archiveType=zip` — requires special "Archive Retrieval" permissions not granted by a standard identity token; do not use
 
-**Version resolution for "latest":** The `/api/v1/skills/{slug}` endpoint does not exist, so you cannot ask for a skill's latest version directly. Instead, search for the slug using `/api/v1/search?q=<slug>&limit=5&offset=0`, then find the result where `name === slug` (exact match) and read its `version` field. If no exact match is found, throw a NOT_FOUND error.
+**Version resolution for "latest":** The Skills API search endpoint (`/api/v1/search?q=...`) performs **text search against description and tags** — it does **not** match on skill names or slugs. Searching for a full slug like `"my-skill-name"` returns zero results. To resolve `"latest"` to a concrete version, use the **native Artifactory storage listing** instead:
+
+```
+GET /api/storage/{repo}/{slug}
+```
+
+This returns a directory listing with `children` — filter for entries where `folder: true`, parse the `uri` fields as semver strings (e.g., `/1.1.0`), and return the highest version. If no version folders are found, throw NOT_FOUND.
 
 **Fingerprint:** There is no endpoint to fetch a remote fingerprint for verification. Do not attempt fingerprint validation. Return an empty string `""` for the `fingerprint` field in both `get_skill_manifest` and `install_skill` responses.
 
-**Install behavior:** The download endpoint returns a zip. When calling it, set the `Accept` header to `application/zip, application/octet-stream, */*` — **not** `application/json`. Sending `application/json` causes the server to return HTTP 406. If your HTTP client sets a default `Accept: application/json` header (e.g. axios), you must override it explicitly for this request. Unzip the response into `destination_path`, preserving directory structure. No fingerprint verification is required or possible.
+**Install behavior:** Skills are stored as individual files uploaded via PUT — there is no pre-built zip bundle and no zip download endpoint. To install a skill:
+
+1. Call `GET /api/storage/{repo}/{slug}/{version}?list&deep=1&listFolders=0` (native client) to get the full recursive file list. Response shape: `{ "files": [{ "uri": "/SKILL.md", "size": 123 }, { "uri": "/references/foo.md", "size": 456 }] }`.
+2. For each file entry, strip the leading `/` from `uri` to get the relative path, then download it from `GET /{repo}/{slug}/{version}/{relPath}` (native client, `responseType: 'arraybuffer'`).
+3. Assemble all downloaded buffers into a zip in memory (e.g., using `adm-zip`'s `addFile(relPath, buffer)`), then extract the zip to `destination_path`.
+4. Return `files_written` as the count of files downloaded.
 
 **Search response — use these exact field names from the Artifactory API:**
 
@@ -215,6 +233,9 @@ Following `mcp-builder`'s structure, produce:
 - Do **not** auto-update or auto-refresh installed skills. Installation is explicit and version-pinned.
 - Do **not** require the JFrog CLI to be installed on the host running the MCP server. Use the REST API directly.
 - Do **not** call `/api/v1/skills/{slug}` or `/api/v1/skills/{slug}/versions/{version}` — these endpoints return 404 in the current Artifactory Skills API.
+- Do **not** call `/api/v1/download` — this endpoint does not exist; skills are stored as individual files, not pre-built zip bundles.
+- Do **not** use the search endpoint (`/api/v1/search?q=<slug>`) to resolve a skill's latest version — the `q` parameter is a text search against description and tags, not a name lookup. Use the native storage listing API instead.
+- Do **not** call `/api/archive/download/...` — this requires special "Archive Retrieval" permissions not available with a standard identity token.
 
 Begin by reading `mcp-builder`'s SKILL.md, then propose your implementation plan (language choice, project structure, dependencies) before writing code. Wait for confirmation before implementing.
 
