@@ -1,4 +1,3 @@
-import { createHash } from 'crypto';
 import { mkdir } from 'fs/promises';
 import https from 'https';
 import AdmZip from 'adm-zip';
@@ -28,21 +27,6 @@ interface ArtifactorySearchResponse {
   offset: number;
 }
 
-interface ArtifactorySkillInfo {
-  slug: string;
-  latestVersion: string;
-  displayName?: string;
-  summary?: string;
-  tags?: string[];
-  updatedAt?: string;
-}
-
-interface ArtifactoryVersionInfo {
-  slug: string;
-  version: string;
-  fingerprint: string;
-  updatedAt?: string;
-}
 
 const MAX_RETRY_ATTEMPTS = 3;
 
@@ -170,11 +154,12 @@ export class ArtifactoryBackend implements RegistryBackend {
 
   private async resolveVersion(slug: string, version: string): Promise<string> {
     if (version !== 'latest') return version;
-    const info = await this.get<ArtifactorySkillInfo>(`/api/v1/skills/${slug}`);
-    if (!info.latestVersion) {
-      throw new RegistryError(`Could not determine latest version for skill "${slug}".`, 'NOT_FOUND');
+    const data = await this.get<ArtifactorySearchResponse>('/api/v1/search', { q: slug, limit: 1, offset: 0 });
+    const match = data.results?.find((r) => r.name === slug);
+    if (!match) {
+      throw new RegistryError(`Not found: skill "${slug}" does not exist in the registry.`, 'NOT_FOUND');
     }
-    return info.latestVersion;
+    return match.version;
   }
 
   async searchSkills(query: string, limit: number): Promise<SkillSummary[]> {
@@ -196,12 +181,7 @@ export class ArtifactoryBackend implements RegistryBackend {
 
   async getSkillManifest(slug: string, requestedVersion: string): Promise<SkillManifest> {
     const version = await this.resolveVersion(slug, requestedVersion);
-
-    const [skillMdContent, versionInfo] = await Promise.all([
-      this.getText(`/api/v1/skills/${slug}/file`, { version, path: 'SKILL.md' }),
-      this.get<ArtifactoryVersionInfo>(`/api/v1/skills/${slug}/versions/${version}`),
-    ]);
-
+    const skillMdContent = await this.getText(`/api/v1/skills/${slug}/file`, { version, path: 'SKILL.md' });
     const metadata = parseFrontmatter(skillMdContent);
 
     return {
@@ -209,7 +189,7 @@ export class ArtifactoryBackend implements RegistryBackend {
       version,
       skill_md_content: skillMdContent,
       metadata,
-      fingerprint: versionInfo.fingerprint ?? '',
+      fingerprint: '',
     };
   }
 
@@ -220,24 +200,7 @@ export class ArtifactoryBackend implements RegistryBackend {
   ): Promise<InstallResult> {
     const version = await this.resolveVersion(slug, requestedVersion);
 
-    const [zipBuffer, versionInfo] = await Promise.all([
-      this.getBuffer('/api/v1/download', { slug, version }),
-      this.get<ArtifactoryVersionInfo>(`/api/v1/skills/${slug}/versions/${version}`),
-    ]);
-
-    const expectedFingerprint = versionInfo.fingerprint;
-    if (expectedFingerprint) {
-      const actualHash = createHash('sha256').update(zipBuffer).digest('hex');
-      const normalizedExpected = expectedFingerprint.replace(/^sha256:/i, '');
-      if (actualHash !== normalizedExpected) {
-        throw new RegistryError(
-          `Fingerprint mismatch for "${slug}@${version}". ` +
-            `Expected ${normalizedExpected}, got ${actualHash}. ` +
-            'The download may be corrupted or tampered with. Refusing to install.',
-          'FINGERPRINT_MISMATCH',
-        );
-      }
-    }
+    const zipBuffer = await this.getBuffer('/api/v1/download', { slug, version });
 
     await mkdir(destinationPath, { recursive: true });
 
@@ -252,7 +215,7 @@ export class ArtifactoryBackend implements RegistryBackend {
       version,
       installed_path: destinationPath,
       files_written: filesWritten,
-      fingerprint: expectedFingerprint ?? '',
+      fingerprint: '',
     };
   }
 }

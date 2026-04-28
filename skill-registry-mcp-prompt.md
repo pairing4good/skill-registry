@@ -32,7 +32,7 @@ Implement exactly these three tools:
 - **Arguments:**
   - `slug` (string, required): skill identifier
   - `version` (string, optional, default "latest"): specific version or "latest"
-- **Returns:** object with `slug`, `version`, `skill_md_content` (raw markdown), `metadata` (parsed frontmatter), `fingerprint`
+- **Returns:** object with `slug`, `version`, `skill_md_content` (raw markdown), `metadata` (parsed frontmatter), `fingerprint` (empty string — see note below)
 
 #### `install_skill`
 - **Description:** Download the full skill directory (all files in the skill bundle) to a local destination path. Use this once the agent or user has decided to use the skill.
@@ -40,7 +40,7 @@ Implement exactly these three tools:
   - `slug` (string, required): skill identifier
   - `version` (string, optional, default "latest"): specific version or "latest"
   - `destination_path` (string, required): absolute local path where the skill directory should be written
-- **Returns:** object with `slug`, `version`, `installed_path`, `files_written` (count), `fingerprint`
+- **Returns:** object with `slug`, `version`, `installed_path`, `files_written` (count), `fingerprint` (empty string — see note below)
 
 ### Artifactory Backend Implementation
 
@@ -55,19 +55,25 @@ https://<JFROG_PLATFORM_URL>/artifactory/api/skills/<REPOSITORY_NAME>
 
 **Endpoints to use:**
 
-| MCP Tool | Artifactory Endpoint | Method |
+| Operation | Artifactory Endpoint | Method |
 |---|---|---|
-| `search_skills` | `/api/v1/search?q=<query>&limit=<n>&offset=0` | GET |
-| `get_skill_manifest` | `/api/v1/skills/{slug}/file?version=<version>&path=SKILL.md` | GET |
-| `install_skill` | `/api/v1/download?slug=<slug>&version=<version>` | GET (returns zip) |
+| Search skills | `/api/v1/search?q=<query>&limit=<n>&offset=0` | GET |
+| Fetch SKILL.md | `/api/v1/skills/{slug}/file?version=<version>&path=SKILL.md` | GET |
+| Download zip | `/api/v1/download?slug=<slug>&version=<version>` | GET (returns zip) |
 
-> **Important:** The endpoints `/api/v1/skills/{slug}` and `/api/v1/skills/{slug}/versions/{version}` are **not available** in JFrog's current Skills API — they return HTTP 404. Do not call them. All required metadata is returned directly from the search endpoint or the SKILL.md file.
+> **Critical:** The following endpoints are **not implemented** in JFrog's current Skills API and return HTTP 404. **Do not call them:**
+> - `/api/v1/skills/{slug}` — does not exist
+> - `/api/v1/skills/{slug}/versions/{version}` — does not exist
+>
+> Everything you need is available from the search endpoint and the SKILL.md file endpoint.
 
-**Version resolution for "latest":** The search endpoint returns the current published version for each skill. For resolving "latest" in `get_skill_manifest` and `install_skill`, execute a single search call for the specific slug (`q=<slug>&limit=1`) and use the `version` field from the matching result.
+**Version resolution for "latest":** The `/api/v1/skills/{slug}` endpoint does not exist, so you cannot ask for a skill's latest version directly. Instead, search for the slug using `/api/v1/search?q=<slug>&limit=5&offset=0`, then find the result where `name === slug` (exact match) and read its `version` field. If no exact match is found, throw a NOT_FOUND error.
 
-**Install behavior:** the download endpoint returns a zip. Unzip into `destination_path`, preserving directory structure. Fingerprint verification via a separate versions endpoint is **not available**; skip fingerprint validation against a remote source.
+**Fingerprint:** There is no endpoint to fetch a remote fingerprint for verification. Do not attempt fingerprint validation. Return an empty string `""` for the `fingerprint` field in both `get_skill_manifest` and `install_skill` responses.
 
-**Search response mapping:** The Artifactory Skills API returns the following shape — use these **exact field names**:
+**Install behavior:** The download endpoint returns a zip. Unzip into `destination_path`, preserving directory structure. No fingerprint verification is required or possible.
+
+**Search response — use these exact field names from the Artifactory API:**
 
 ```json
 {
@@ -92,14 +98,14 @@ Map to the MCP `search_skills` return shape as follows:
 
 | MCP field | Artifactory field | Notes |
 |---|---|---|
-| `slug` | `name` | Direct mapping |
-| `display_name` | derived from `name` | Convert kebab-case to Title Case (e.g. `my-skill-slug` → `My Skill Slug`) |
-| `summary` | `description` | Direct mapping |
+| `slug` | `name` | Direct mapping — the API uses `name`, not `slug` |
+| `display_name` | derived from `name` | Convert kebab-case to Title Case: `my-skill-slug` → `My Skill Slug` |
+| `summary` | `description` | Direct mapping — the API uses `description`, not `summary` |
 | `latest_version` | `version` | Direct mapping |
-| `tags` | `tags` | Already present in the search response — no enrichment call needed |
+| `tags` | `tags` | Already present in the search response — **no secondary call needed** |
 | `updated_at` | *(not available)* | Return empty string `""` |
 
-**Do not** make a secondary enrichment request to `/api/v1/skills/{slug}` to fetch tags — tags are already present in the search response and that endpoint returns 404.
+> **Do not** make a secondary enrichment request per result. Tags and description are already in the search response. The per-skill info endpoint (`/api/v1/skills/{slug}`) returns 404.
 
 **Error handling:** translate HTTP 401/403 → "authentication failed" (no credential details), 404 → "skill not found", 5xx → "registry unavailable, retry later". Other errors → generic message with HTTP status code.
 
@@ -147,7 +153,7 @@ The server should work out of the box with a JFrog free trial (Pro Cloud). Docum
 
 1. Sign up at https://jfrog.com/start-free/ for a free Pro Cloud trial. Note your platform URL (looks like `https://<id>.jfrog.io`).
 2. In the JFrog UI, go to **Administration → Repositories → Create a Repository**, choose **Local**, select package type **Skills**, name it `skills-local`. (Skills package type requires open-beta enablement on the trial; if not visible, contact JFrog support to enable it.)
-3. Generate an identity token: top-right user menu → **Edit Profile** → **Generate an Identity Token**. Copy the token.
+3. Generate an identity token: top-right user menu → **Edit Profile** → **Generate an Identity Token**. Copy the full token value — it is a long string, not a short UUID.
 4. Copy `.env.example` to `.env` in the project root and populate the values:
    ```bash
    cp .env.example .env
@@ -158,7 +164,7 @@ The server should work out of the box with a JFrog free trial (Pro Cloud). Docum
    ARTIFACTORY_PLATFORM_URL=https://<your-id>.jfrog.io
    ARTIFACTORY_REPOSITORY=skills-local
    ARTIFACTORY_AUTH_METHOD=bearer
-   ARTIFACTORY_ACCESS_TOKEN=<paste-identity-token>
+   ARTIFACTORY_ACCESS_TOKEN=<paste-full-identity-token>
    ```
    Confirm `.env` is listed in `.gitignore` so it is not committed.
 5. Run the MCP server. The server loads `.env` at startup automatically. Configure your MCP client (Claude Code, Claude Desktop, etc.) to connect to it.
@@ -183,8 +189,10 @@ Per `mcp-builder`'s guidance, include:
 1. **Unit tests** for the `RegistryBackend` interface contract using a fake/mock backend.
 2. **Integration tests** for `ArtifactoryBackend` that hit a real Artifactory instance. These should be opt-in (skipped unless env vars are set) and documented in the README. Include a sample skill to publish for the integration tests.
 3. **MCP tool tests** that exercise each tool through the MCP protocol with a mock backend.
-4. **Error-path tests**: invalid auth, missing skill, malformed responses, network failures, fingerprint mismatch.
+4. **Error-path tests**: invalid auth, missing skill, network failures. Note: fingerprint mismatch is **not a test case** — the Artifactory Skills API does not expose a fingerprint endpoint, so no fingerprint verification is performed.
 5. **Config validation tests**: missing env vars, invalid combinations (e.g., `auth_method: bearer` without access token).
+
+Mock fixtures used in unit tests must use the **actual Artifactory API field names** (`name`, `description`, `tags`) — not assumed names like `slug`, `displayName`, or `summary`. This ensures tests catch field mapping regressions.
 
 ### Deliverables
 
@@ -206,6 +214,7 @@ Following `mcp-builder`'s structure, produce:
 - Do **not** include credential values in any error message returned to the MCP client.
 - Do **not** auto-update or auto-refresh installed skills. Installation is explicit and version-pinned.
 - Do **not** require the JFrog CLI to be installed on the host running the MCP server. Use the REST API directly.
+- Do **not** call `/api/v1/skills/{slug}` or `/api/v1/skills/{slug}/versions/{version}` — these endpoints return 404 in the current Artifactory Skills API.
 
 Begin by reading `mcp-builder`'s SKILL.md, then propose your implementation plan (language choice, project structure, dependencies) before writing code. Wait for confirmation before implementing.
 
