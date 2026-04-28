@@ -12,10 +12,12 @@ import type { RegistryBackend } from './interface.js';
 
 // Artifactory API response shapes
 interface ArtifactorySearchResult {
-  slug: string;
+  name: string;
   version: string;
-  displayName?: string;
-  summary?: string;
+  description?: string;
+  author?: string;
+  downloadUrl?: string;
+  tags?: string[];
   match?: number;
 }
 
@@ -43,7 +45,6 @@ interface ArtifactoryVersionInfo {
 }
 
 const MAX_RETRY_ATTEMPTS = 3;
-const ENRICHMENT_LIMIT = 10;
 
 function translateHttpError(error: AxiosError, slug?: string): RegistryError {
   const status = error.response?.status;
@@ -183,28 +184,14 @@ export class ArtifactoryBackend implements RegistryBackend {
       offset: 0,
     });
 
-    const results = data.results ?? [];
-
-    // Enrich top results with tags and updated_at from the skill info endpoint
-    const enriched = await Promise.allSettled(
-      results.slice(0, ENRICHMENT_LIMIT).map((r) =>
-        this.get<ArtifactorySkillInfo>(`/api/v1/skills/${r.slug}`).catch(() => null),
-      ),
-    );
-
-    return results.map((result, idx): SkillSummary => {
-      const infoResult = idx < ENRICHMENT_LIMIT ? enriched[idx] : undefined;
-      const info = infoResult?.status === 'fulfilled' ? infoResult.value : null;
-
-      return {
-        slug: result.slug,
-        display_name: info?.displayName ?? result.displayName ?? result.slug,
-        summary: info?.summary ?? result.summary ?? '',
-        latest_version: result.version,
-        tags: info?.tags ?? [],
-        updated_at: info?.updatedAt ?? '',
-      };
-    });
+    return (data.results ?? []).map((result): SkillSummary => ({
+      slug: result.name,
+      display_name: result.name.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+      summary: result.description ?? '',
+      latest_version: result.version,
+      tags: result.tags ?? [],
+      updated_at: '',
+    }));
   }
 
   async getSkillManifest(slug: string, requestedVersion: string): Promise<SkillManifest> {

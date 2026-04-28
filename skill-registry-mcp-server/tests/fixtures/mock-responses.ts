@@ -1,17 +1,21 @@
 export const MOCK_SEARCH_RESPONSE = {
   results: [
     {
-      slug: 'incident-runbook',
+      name: 'incident-runbook',
       version: '2.0.0',
-      displayName: 'Incident Runbook',
-      summary: 'AI co-pilot for production incident response and postmortem writing.',
+      description: 'AI co-pilot for production incident response and postmortem writing.',
+      author: 'skill-registry-sample',
+      downloadUrl: 'api/v1/download?slug=incident-runbook&version=2.0.0',
+      tags: ['incident-response', 'on-call', 'postmortem', 'sre'],
       match: 0.98,
     },
     {
-      slug: 'openapi-contract-check',
+      name: 'openapi-contract-check',
       version: '1.0.0',
-      displayName: 'OpenAPI Contract Check',
-      summary: 'Audits OpenAPI specs against a 30+ rule catalog.',
+      description: 'Audits OpenAPI specs against a 30+ rule catalog.',
+      author: 'skill-registry-sample',
+      downloadUrl: 'api/v1/download?slug=openapi-contract-check&version=1.0.0',
+      tags: ['openapi', 'api', 'validation'],
       match: 0.72,
     },
   ],

@@ -3,7 +3,6 @@ import type { RegistryBackend } from '../../src/backends/interface.js';
 import type { InstallResult, SkillManifest, SkillSummary } from '../../src/types.js';
 import {
   MOCK_SKILL_MD,
-  MOCK_SKILL_INFO,
   MOCK_SEARCH_RESPONSE,
   MOCK_VERSION_INFO,
 } from '../fixtures/mock-responses.js';
@@ -14,16 +13,16 @@ class FakeBackend implements RegistryBackend {
 
   async searchSkills(query: string, limit: number): Promise<SkillSummary[]> {
     const results = MOCK_SEARCH_RESPONSE.results
-      .filter((r) => r.slug.includes(query) || r.summary?.toLowerCase().includes(query))
+      .filter((r) => r.name.includes(query) || r.description?.toLowerCase().includes(query))
       .slice(0, limit);
 
     return results.map((r) => ({
-      slug: r.slug,
-      display_name: r.displayName ?? r.slug,
-      summary: r.summary ?? '',
+      slug: r.name,
+      display_name: r.name.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+      summary: r.description ?? '',
       latest_version: r.version,
-      tags: MOCK_SKILL_INFO[r.slug as keyof typeof MOCK_SKILL_INFO]?.tags ?? [],
-      updated_at: MOCK_SKILL_INFO[r.slug as keyof typeof MOCK_SKILL_INFO]?.updatedAt ?? '',
+      tags: r.tags ?? [],
+      updated_at: '',
     }));
   }
 
